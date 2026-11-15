@@ -1,0 +1,39 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Test cache
+.pytest_cache/
+
+# Build output (PyInstaller)
+build/
+dist/
+*.spec
+
+# Downloaded third-party tools (fetched by Install.bat)
+third_party/
+
+# Machine-specific shortcut (created by Install.bat)
+*.lnk
+
+# Code-signing certificates and keys
+*.pfx
+*.p12
+*.cer
+*.key
+*.pem
+
+# Logs
+*.log
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Local code-check reports
+tests/FINDINGS.md
+tests/LOG.md
+tests/PASSES.md
+tests/VERIFY.md
