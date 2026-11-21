@@ -6,7 +6,7 @@ media. It works entirely offline, and your originals are never changed.
 ## Install
 
 **Without Python:** download the `FileCleaner-<version>-win64.zip` from the
-[Releases page](https://github.com/OWNER/REPO/releases/latest), unzip it anywhere and run
+[Releases page](https://github.com/ArisMGGR/gen-ImageDocsCleaner/releases/latest), unzip it anywhere and run
 **`File Cleaner.exe`** in the unzipped folder. Keep the `_internal` folder next to it.
 
 **From source:**

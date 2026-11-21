@@ -44,12 +44,45 @@ def _image_extension(obj) -> str | None:
         return None
     filters = obj.get("/Filter")
     if isinstance(filters, pikepdf.Array):
-        filters = filters[0] if len(filters) == 1 else None
+        # The image format is the last filter; any before it (say, Flate) only wrap the file.
+        filters = filters[len(filters) - 1] if len(filters) else None
     if filters == pikepdf.Name.DCTDecode:
         return ".jpg"
     if filters == pikepdf.Name.JPXDecode:
         return ".jp2"
     return None
+
+
+def _image_file(obj: pikepdf.Stream) -> bytes:
+    """The JPEG or JPEG 2000 file itself, with any general filters applied on top of it undone."""
+    filters = obj.get("/Filter")
+    if not isinstance(filters, pikepdf.Array) or len(filters) < 2:
+        return obj.read_raw_bytes()
+    parms = obj.get("/DecodeParms")
+    with pikepdf.new() as scratch:  # the stream needs an owning file while it is decoded
+        outer = pikepdf.Stream(scratch, obj.read_raw_bytes())
+        outer["/Filter"] = pikepdf.Array(list(filters)[:-1])
+        if isinstance(parms, pikepdf.Array):
+            outer["/DecodeParms"] = pikepdf.Array(list(parms)[:-1])
+        try:
+            return outer.read_bytes(decode_level=pikepdf.StreamDecodeLevel.specialized)
+        except pikepdf.PdfError as error:
+            raise CleaningError("An embedded image could not be read.") from error
+
+
+def _write_image_file(obj: pikepdf.Stream, data: bytes) -> None:
+    """Stores the file with only its image filter, dropping the general filters that wrapped it."""
+    filters = obj.get("/Filter")
+    if not isinstance(filters, pikepdf.Array) or len(filters) < 2:
+        obj.write(data, filter=filters)
+        return
+    parms = obj.get("/DecodeParms")
+    last = parms[len(parms) - 1] if isinstance(parms, pikepdf.Array) and len(parms) else None
+    obj.write(data, filter=filters[len(filters) - 1])
+    if isinstance(last, pikepdf.Dictionary):
+        obj.DecodeParms = last
+    elif "/DecodeParms" in obj:
+        del obj["/DecodeParms"]
 
 
 def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
@@ -72,7 +105,7 @@ def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
             with tempfile.TemporaryDirectory(prefix="filecleaner-", ignore_cleanup_errors=True) as temp:
                 file = os.path.join(temp, "image" + ext)
                 with open(file, "wb") as f:
-                    f.write(obj.read_raw_bytes())
+                    f.write(_image_file(obj))
                 inner = images.scan(file, f"Embedded image {index}", cancel)
             result.tags.extend(t for t in inner.tags if t.must_be_removed)
 
@@ -133,7 +166,7 @@ def clean(source: str, target: str, cancel: threading.Event | None = None, extra
             check(cancel)
             ext = _image_extension(obj)
             if ext is not None:
-                obj.write(_strip_image(obj.read_raw_bytes(), ext, cancel), filter=obj.get("/Filter"))
+                _write_image_file(obj, _strip_image(_image_file(obj), ext, cancel))
                 cleaned += 1
             for key in _PRIVATE_KEYS:
                 if key in obj:

@@ -38,11 +38,12 @@ try {
 
     if (-not (Test-Path (Join-Path $tools 'ffmpeg\ffmpeg.exe'))) {
         # LGPL static build, hash from the GitHub release asset.
-        # Autobuild tags are pruned over time: update the tag, name and hash together.
-        $tag = 'autobuild-2026-11-04-12-51'
-        $name = 'ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1'
-        $zip = Get-Verified "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$name.zip" `
-            'c966229f0b033a1cf93b3fb139a804358a4ec27a53b8a6213fe08301868a7668' 'ffmpeg.zip'
+        # Daily builds are deleted after 14 days, but the last build of each month is kept for two years,
+        # so always pin a month-end build (this one until about October 2028). Update tag, name and hash together.
+        $tag = 'autobuild-2026-10-31-12-59'
+        $name = 'ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-8.1'
+        $zip = Get-Verified "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/$tag/$name.zip" `
+            'd4c2a42673917b4a97104a3e9f082729a9730796b98664e37c0b7eba6c6c613d' 'ffmpeg.zip'
         $out = Join-Path $work 'ffmpeg'
         Expand-Archive $zip $out
         $dir = Get-ChildItem $out -Directory | Select-Object -First 1

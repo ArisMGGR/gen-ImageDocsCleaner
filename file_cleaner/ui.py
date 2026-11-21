@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import html
+import importlib
 import json
 import os
 import sys
@@ -120,7 +121,11 @@ def load_settings(path: Path) -> dict:
         settings = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return settings if isinstance(settings, dict) else {}
+    if not isinstance(settings, dict):
+        return {}
+    if not isinstance(settings.get("output_folder", ""), str):
+        del settings["output_folder"]  # the folder is simply asked for again
+    return settings
 
 
 def save_settings(path: Path, settings: dict) -> None:
@@ -150,6 +155,7 @@ class MainWindow(QMainWindow):
         self.items: dict[str, Item] = {}
         self.pool = ThreadPoolExecutor(MAX_PARALLEL)
         self.cancel = threading.Event()
+        self.closing = threading.Event()  # stops scans too; Cancel only stops cleaning
         self.pending = 0
         self.busy = False
 
@@ -315,7 +321,7 @@ class MainWindow(QMainWindow):
 
     def _scan(self, item: Item) -> None:
         try:
-            self.signals.scanned.emit(item, engine.scan(item.path), None)
+            self.signals.scanned.emit(item, engine.scan(item.path, self.closing), None)
         except Exception as error:  # a broken file must never take the app down
             self.signals.scanned.emit(item, None, error)
 
@@ -511,6 +517,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.cancel.set()
+        self.closing.set()
         self.pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
@@ -527,13 +534,25 @@ def _use_dark_title_bar(window: QMainWindow) -> None:
         pass  # purely cosmetic
 
 
+def selftest() -> list[str]:
+    """Checks that every file type can actually be handled: runs both tools and loads each cleaner,
+    since a library or program can be present on disk and still be blocked from running."""
+    problems = tools.tool_problems()
+    for name in ("images", "media", "pdf", "office"):
+        try:
+            importlib.import_module(f"{__package__}.{name}")
+        except (ImportError, OSError) as error:
+            problems.append(f"The {name} cleaner could not load: {error}")
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
 
     if "--selftest" in argv:
-        missing = tools.missing_tools()
-        print("Missing: " + ", ".join(missing) if missing else "OK")
-        return 1 if missing else 0
+        problems = selftest()
+        print("\n".join(problems) if problems else "OK")
+        return 1 if problems else 0
 
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)

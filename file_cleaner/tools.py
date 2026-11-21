@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 
 from .classifier import classify, is_empty_value
-from .models import Cancelled, Category, CleaningError, Tag
+from .models import Cancelled, Category, CleaningError, Tag, check
 
 # The standalone build (PyInstaller) keeps the same layout inside its _internal folder.
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "third_party" / "tools"
@@ -26,6 +26,24 @@ _CHUNK = 1 << 20
 
 def missing_tools() -> list[str]:
     return [p.name for p in (EXIFTOOL, FFMPEG) if not p.exists()]
+
+
+def tool_problems() -> list[str]:
+    """Runs each tool once. A file that exists can still fail to start, for example when Windows
+    Smart App Control or antivirus blocks it."""
+    problems = []
+    for path, args in ((EXIFTOOL, ["-ver"]), (FFMPEG, ["-version"])):
+        if not path.exists():
+            problems.append(f"{path.name} is missing.")
+            continue
+        try:
+            result = run_tool([str(path), *args])
+        except OSError as error:
+            problems.append(f"{path.name} could not start (blocked by Windows?): {error.strerror or error}")
+            continue
+        if result.returncode != 0:
+            problems.append(f"{path.name} failed with exit code {result.returncode}.")
+    return problems
 
 
 def run_tool(args: list[str], cancel: threading.Event | None = None) -> subprocess.CompletedProcess:
@@ -109,13 +127,14 @@ def strip_image(source: str, target: str, cancel: threading.Event | None = None)
     return _exiftool(args, cancel).returncode == 0 and os.path.exists(target)
 
 
-def find_location_marker(path: str) -> str | None:
+def find_location_marker(path: str, cancel: threading.Event | None = None) -> str | None:
     """A second opinion after cleaning, covering places a metadata reader would not parse. The markers
     are long enough that they won't occur by chance inside compressed image or video data."""
     overlap = max(len(m) for m in _LOCATION_MARKERS)
     tail = b""
     with open(path, "rb") as f:
         while chunk := f.read(_CHUNK):
+            check(cancel)
             data = tail + chunk
             for marker in _LOCATION_MARKERS:
                 if marker in data:

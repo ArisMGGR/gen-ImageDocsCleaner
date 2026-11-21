@@ -1,5 +1,6 @@
 # Creates "File Cleaner.lnk" in the project folder (called by Install.bat).
 # Shortcuts store absolute paths, so this runs on your PC rather than being committed.
+$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $lnkPath = Join-Path $root 'File Cleaner.lnk'
 $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)

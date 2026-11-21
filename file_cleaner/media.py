@@ -9,7 +9,7 @@ from .models import Category, CleaningError, ScanResult, Tag
 
 def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
     result = ScanResult(tools.read_tags(path, embedded=True, cancel=cancel))
-    marker = tools.find_location_marker(path)
+    marker = tools.find_location_marker(path, cancel)
     if marker and not result.has_location:
         result.tags.append(Tag(Category.LOCATION, "Location data", f"Hidden marker: {marker}"))
     return result

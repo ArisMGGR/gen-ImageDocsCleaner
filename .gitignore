@@ -32,6 +32,9 @@ third_party/
 Thumbs.db
 desktop.ini
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Local code-check reports
 tests/FINDINGS.md
 tests/LOG.md

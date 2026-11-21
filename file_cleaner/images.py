@@ -19,7 +19,7 @@ _LOSSY_FORMATS = {"JPEG", "WEBP", "HEIF"}  # where the quality setting applies; 
 
 def scan(path: str, source: str | None = None, cancel: threading.Event | None = None) -> ScanResult:
     result = ScanResult(tools.read_tags(path, source=source, cancel=cancel))
-    marker = tools.find_location_marker(path)
+    marker = tools.find_location_marker(path, cancel)
     if marker and not result.has_location:
         result.tags.append(Tag(Category.LOCATION, "Location data", f"Hidden marker: {marker}", source))
     return result

@@ -230,8 +230,7 @@ def test_accepting_a_deleted_table_row_removes_the_row(tmp_path, out):
     document.save(source)
     with zipfile.ZipFile(source) as archive:
         body = archive.read("word/document.xml").decode()
-    marked = body.replace("<w:tr>", "<w:tr>", 1)
-    rows = marked.split("<w:tr>")
+    rows = body.split("<w:tr>")
     rows[2] = '<w:trPr><w:del w:id="5" w:author="Ingrid Reviewer"/></w:trPr>' + rows[2]
     edit_zip(source, {"word/document.xml": "<w:tr>".join(rows)})
 

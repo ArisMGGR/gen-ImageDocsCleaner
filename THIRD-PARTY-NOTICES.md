@@ -6,9 +6,11 @@ stored in this repository: `Install.bat` downloads them, and the standalone buil
 | Component | Use | License | Source |
 | --- | --- | --- | --- |
 | ExifTool 13.60 by Phil Harvey | Reads and removes metadata | Perl Artistic License or GPL | https://exiftool.org |
-| FFmpeg 8.1 (LGPL build by BtbN) | Copies media without metadata | LGPL 2.1 or later | https://ffmpeg.org, build: https://github.com/BtbN/FFmpeg-Builds |
+| FFmpeg 8.1 (LGPL build by BtbN) | Copies media without metadata | LGPL 2.1 or later | https://ffmpeg.org, build: https://github.com/FFmpeg-Builds/FFmpeg-Builds |
 | PySide6 (Qt) | App window | LGPL 3.0 | https://doc.qt.io/qtforpython |
-| pikepdf (qpdf) | Rewrites PDF files | MPL 2.0 | https://github.com/pikepdf/pikepdf |
+| pikepdf | Rewrites PDF files | MPL 2.0 | https://github.com/pikepdf/pikepdf |
+| qpdf (in pikepdf) | PDF library pikepdf is built on | Apache License 2.0 | https://github.com/qpdf/qpdf |
+| lxml (used by pikepdf) | XML library pikepdf needs | BSD 3-Clause. Its binary wheel includes libxml2, libxslt and libexslt (MIT), zlib (zlib License) and iconv (LGPL 2.1) | https://github.com/lxml/lxml |
 | Pillow | Re-saves images as a fallback | MIT-CMU | https://github.com/python-pillow/Pillow |
 | pillow-heif | HEIC support for Pillow | Source: BSD 3-Clause. Binary wheel: GPL 2.0, because it includes x265 | https://github.com/bigcat88/pillow_heif |
 | libheif, libde265 (in pillow-heif) | Decode HEIC images | LGPL 3.0 | https://github.com/strukturag/libheif, https://github.com/strukturag/libde265 |

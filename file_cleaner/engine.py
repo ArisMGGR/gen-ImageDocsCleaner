@@ -24,17 +24,20 @@ def is_supported(path: str) -> bool:
 
 
 def _handler(path: str):
-    # Imported here because office.py calls back into this module for embedded files.
-    from . import images, media, office, pdf
-
+    # Imported here because office.py calls back into this module for embedded files, and one at a time,
+    # so a library that fails to load (say, blocked by Smart App Control) only affects its own file types.
     ext = Path(path).suffix.lower()
     if ext in IMAGE_TYPES:
+        from . import images
         return images
     if ext in MEDIA_TYPES:
+        from . import media
         return media
     if ext == ".pdf":
+        from . import pdf
         return pdf
     if ext in DOCUMENT_TYPES:
+        from . import office
         return office
     raise CleaningError("This file type is not supported.")
 
@@ -72,7 +75,10 @@ def clean(source: str, output_folder: str, relative_folder: str = "",
 
 def _publish(cleaned: str, source: str, output_folder: str, relative_folder: str) -> str:
     folder = os.path.join(output_folder, relative_folder)
-    os.makedirs(folder, exist_ok=True)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as error:
+        raise CleaningError(f"The cleaned copy could not be saved: {error.strerror}") from error
 
     target = _reserve_path(folder, os.path.basename(source))
     partial = None

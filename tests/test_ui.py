@@ -1,6 +1,7 @@
 """Drives the real window through the whole flow, without showing it on screen."""
 
 import os
+import sys
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -8,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from conftest import exif
 from PIL import Image
-from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 
@@ -22,11 +23,20 @@ def app():
     return application
 
 
+def dispose(win):
+    """Closes the window and deletes it now. A window that has run a scan and is left for interpreter
+    shutdown crashes the test process on exit (seen with PySide6 6.12 on Python 3.14), after every test passed."""
+    win.close()
+    win.pool.shutdown(wait=True)
+    win.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.fixture
 def window(app, tmp_path):
     win = ui.MainWindow(tmp_path / "settings.json")
     yield win
-    win.close()
+    dispose(win)
 
 
 def wait_for(app, condition, timeout=30):
@@ -112,11 +122,11 @@ def test_output_folder_is_remembered(app, tmp_path):
     settings = tmp_path / "settings.json"
     first = ui.MainWindow(settings)
     first.set_output_folder(str(tmp_path))
-    first.close()
+    dispose(first)
 
     second = ui.MainWindow(settings)
     assert str(tmp_path) in second.output_label.text()
-    second.close()
+    dispose(second)
 
 
 def test_remove_extras_option_is_remembered_and_applied(app, tmp_path):
@@ -137,7 +147,7 @@ def test_remove_extras_option_is_remembered_and_applied(app, tmp_path):
     assert "will stay in the file" in first.details.toPlainText()
     first.remove_extras.setChecked(True)
     assert "Comments will be removed." in first.details.toPlainText()
-    first.close()
+    dispose(first)
 
     second = ui.MainWindow(settings)
     assert second.remove_extras.isChecked()
@@ -151,4 +161,17 @@ def test_remove_extras_option_is_remembered_and_applied(app, tmp_path):
     assert item.state is ui.State.CLEANED, item.error
     assert item.extras == []
     assert "Removed comments." in second.details.toPlainText()
-    second.close()
+    dispose(second)
+
+
+def test_selftest_reports_tools_and_libraries_that_cannot_run(monkeypatch, tmp_path):
+    fake = tmp_path / "ffmpeg.exe"
+    fake.write_text("not a program")  # exists on disk, but Windows cannot start it
+    monkeypatch.setattr(ui.tools, "FFMPEG", fake)
+    monkeypatch.setitem(sys.modules, "file_cleaner.pdf", None)  # as if pikepdf were blocked
+
+    problems = ui.selftest()
+
+    assert any(p.startswith("ffmpeg.exe could not start") for p in problems), problems
+    assert any(p.startswith("The pdf cleaner could not load") for p in problems), problems
+    assert not any("exiftool" in p or "images" in p for p in problems), problems

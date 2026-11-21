@@ -9,8 +9,10 @@ import tempfile
 import threading
 import xml.etree.ElementTree as ET
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from xml.dom import minidom
+from xml.parsers.expat import ExpatError
 
 from . import engine
 from .models import Category, CleaningError, ScanResult, Tag, check
@@ -99,7 +101,7 @@ def _layout(archive: zipfile.ZipFile) -> _Layout:
 
     for rel in rels:
         rel_type = rel.get("Type", "")
-        target = rel.get("Target", "").lstrip("/")
+        target = _resolve("", rel.get("Target", ""))  # root relationships belong to the package itself
         if rel_type.endswith("/core-properties"):
             layout.core = target
         elif rel_type.endswith("/extended-properties"):
@@ -111,11 +113,23 @@ def _layout(archive: zipfile.ZipFile) -> _Layout:
     return layout
 
 
+_DAMAGED = "This file is damaged or password protected."
+
+
 def _open(path: str) -> zipfile.ZipFile:
     try:
         return zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError) as error:
-        raise CleaningError("This file is damaged or password protected.") from error
+        raise CleaningError(_DAMAGED) from error
+
+
+@contextmanager
+def _damaged_on_error():
+    """A part that isn't well-formed XML, or a corrupt entry, means the package is damaged."""
+    try:
+        yield
+    except (ET.ParseError, ExpatError, zipfile.BadZipFile, EOFError) as error:
+        raise CleaningError(_DAMAGED) from error
 
 
 def _is_embedded_file(name: str, layout: _Layout) -> bool:
@@ -223,7 +237,7 @@ def _find_extras(archive: zipfile.ZipFile) -> tuple[dict[str, str], list[str]]:
 
 def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
     result = ScanResult()
-    with _open(path) as archive:
+    with _damaged_on_error(), _open(path) as archive:
         layout = _layout(archive)
         _read_properties(archive, layout.core, result)
         _read_properties(archive, layout.app, result)
@@ -236,8 +250,7 @@ def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
         if rels is not None and any(r.get("Type", "").endswith("/attachedTemplate") for r in rels):
             result.tags.append(Tag(Category.OTHER, "Template path", "Attached template location"))
 
-        settings = _read_xml(archive, _SETTINGS)
-        if settings is not None and any(_local(e.tag) == "rsids" for e in settings.iter()):
+        if _has_revision_ids(archive):
             result.tags.append(Tag(Category.OTHER, "Revision IDs", "Editing session identifiers"))
 
         workbook = _read_xml(archive, _WORKBOOK)
@@ -251,6 +264,23 @@ def scan(path: str, cancel: threading.Event | None = None) -> ScanResult:
         result.extras = [e for e in _EXTRA_ORDER if e in extras or e in result.extras]
         _add_warnings(archive, workbook, result)
     return result
+
+
+def _is_revision_id(attribute: str) -> bool:
+    """Word stamps paragraphs, runs and rows with w:rsidR, w:rsidRPr and the like: the same editing session
+    identifiers listed in settings.xml."""
+    return attribute.startswith("{" + _W + "}rsid")
+
+
+def _has_revision_ids(archive: zipfile.ZipFile) -> bool:
+    for name in archive.namelist():
+        if not _is_word_part(name):
+            continue
+        root = _read_xml(archive, name)
+        if root is not None and any(
+                _local(e.tag) == "rsids" or any(_is_revision_id(a) for a in e.attrib) for e in root.iter()):
+            return True
+    return False
 
 
 def _read_properties(archive: zipfile.ZipFile, part: str | None, result: ScanResult) -> None:
@@ -318,7 +348,7 @@ def _has_hidden_text(archive: zipfile.ZipFile, name: str) -> bool:
 
 def clean(source: str, target: str, cancel: threading.Event | None = None, extras: bool = False) -> list[str]:
     cleaned = 0
-    with _open(source) as archive, zipfile.ZipFile(target, "x", zipfile.ZIP_DEFLATED) as output:
+    with _damaged_on_error(), _open(source) as archive, zipfile.ZipFile(target, "x", zipfile.ZIP_DEFLATED) as output:
         layout = _layout(archive)
         removal = _plan_removal(archive) if extras else None
         for name in archive.namelist():
@@ -337,6 +367,8 @@ def clean(source: str, target: str, cancel: threading.Event | None = None, extra
                 cleaned += 1
             else:
                 edits = [_EDITS[name]] if name in _EDITS else []
+                if _is_word_part(name):
+                    edits.append(_remove_revision_ids)
                 if removal:
                     edits += removal.edits_for(name)
                 content = _edit_xml(archive.read(name), *edits) if edits else archive.read(name)
@@ -439,8 +471,12 @@ def _accept_revisions(document: minidom.Document) -> None:
             parent = element.parentNode
             if parent.localName == "trPr" and parent.parentNode is not None:
                 _remove(parent.parentNode)  # a deleted table row
+            elif parent.localName == "rPr" and parent.parentNode is not None and \
+                    parent.parentNode.localName == "pPr" and parent.parentNode.parentNode is not None:
+                _remove(element)  # a deleted paragraph break: the paragraph joins the next one
+                _merge_with_next(parent.parentNode.parentNode)
             else:
-                _remove(element)  # deleted text, or the mark on a deleted paragraph break
+                _remove(element)  # deleted text
     for name in ("ins", "moveTo"):
         for element in _elements_in(document, _W, name):
             if element.parentNode is not None:
@@ -449,6 +485,23 @@ def _accept_revisions(document: minidom.Document) -> None:
         for element in _elements_in(document, _W, name):
             if element.parentNode is not None:
                 _remove(element)
+
+
+def _merge_with_next(paragraph: minidom.Element) -> None:
+    """With its paragraph mark deleted, a paragraph's content is combined with the following paragraph,
+    which keeps its own properties (ECMA-376 17.13.5.15)."""
+    following = paragraph.nextSibling
+    while following is not None and following.nodeType != following.ELEMENT_NODE:
+        following = following.nextSibling
+    if paragraph.localName != "p" or following is None or \
+            following.namespaceURI != _W or following.localName != "p":
+        return  # last paragraph in its cell or section: nothing to join
+    anchor = next((c for c in following.childNodes
+                   if c.nodeType == c.ELEMENT_NODE and c.localName != "pPr"), None)
+    for child in list(paragraph.childNodes):
+        if not (child.nodeType == child.ELEMENT_NODE and child.localName == "pPr"):
+            following.insertBefore(child, anchor)
+    _remove(paragraph)
 
 
 def _remove_comment_marks(document: minidom.Document) -> None:
@@ -494,6 +547,13 @@ def _remove_word_traces(document: minidom.Document) -> None:
     for name in ("attachedTemplate", "rsids"):
         for element in _elements(document, name):
             _remove(element)
+
+
+def _remove_revision_ids(document: minidom.Document) -> None:
+    for element in document.getElementsByTagName("*"):
+        for attribute in list(element.attributes.values()):
+            if attribute.namespaceURI == _W and attribute.localName.startswith("rsid"):
+                element.removeAttributeNode(attribute)
 
 
 def _remove_saved_path(document: minidom.Document) -> None:

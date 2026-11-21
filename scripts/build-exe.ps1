@@ -43,6 +43,11 @@ VSVersionInfo(
 [IO.File]::WriteAllText($versionFile, $versionInfo, (New-Object Text.UTF8Encoding $false))  # no BOM
 
 Write-Host "Building File Cleaner $version ..."
+# PyInstaller fills in missing DLLs from PATH. Limit it to Windows itself, so libraries from other
+# software on this PC (say, OpenSSL from Git for Windows) never end up in the build.
+$savedPath = $env:PATH
+$env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+try {
 & $python -m PyInstaller (Join-Path $root 'run.py') `
     --noconfirm --clean --windowed --log-level WARN `
     --name 'File Cleaner' `
@@ -53,6 +58,9 @@ Write-Host "Building File Cleaner $version ..."
     --add-data "$(Join-Path $root 'third_party\tools');third_party\tools" `
     --exclude-module tkinter --exclude-module pytest
 Invoke-Checked 'PyInstaller'
+} finally {
+    $env:PATH = $savedPath
+}
 
 foreach ($file in 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item (Join-Path $root $file) $app
